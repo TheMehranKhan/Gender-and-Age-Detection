@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gender and Age Detection</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            font-family: Arial, sans-serif;
+        }
+        
+        #loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            transition: opacity 0.5s ease;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #333;
+            border-top: 5px solid #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror the video */
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        #status {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 14px;
+            z-index: 100;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        .grayscale {
+            filter: grayscale(100%);
+        }
+
+        #controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+        }
+
+        button {
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+            border-radius: 5px;
+            backdrop-filter: blur(5px);
+            transition: all 0.3s ease;
+        }
+
+        button:hover {
+            background: rgba(255, 255, 255, 0.4);
+        }
+
+        select {
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            color: white;
+            font-size: 16px;
+            border-radius: 5px;
+            margin-right: 10px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <h2>Initializing Camera...</h2>
+        <p>Please allow camera access</p>
+    </div>
+
+    <div id="controls">
+        <select id="cameraSelect"></select>
+        <button id="bwBtn">B&W Filter</button>
+        <button onclick="window.location.href='/dashboard.html'" style="margin-left: 10px;">View Database</button>
+    </div>
+
+    <div id="container">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="overlay"></canvas>
+        <div id="status">Initializing...</div>
+    </div>
+
+    <!-- Hidden canvas for capturing frames (smaller for speed) -->
+    <canvas id="captureCanvas" width="320" height="240" style="display:none;"></canvas>
+
+    <script>
+        const video = document.getElementById('video');
+        const overlay = document.getElementById('overlay');
+        const captureCanvas = document.getElementById('captureCanvas');
+        const loadingScreen = document.getElementById('loading');
+        const statusDiv = document.getElementById('status');
+        const bwBtn = document.getElementById('bwBtn');
+        const cameraSelect = document.getElementById('cameraSelect');
+        
+        const ctx = overlay.getContext('2d');
+        const captureCtx = captureCanvas.getContext('2d');
+
+        let isRunning = false;
+        let processing = false;
+        let isBW = false;
+        let currentStream = null;
+
+        // B&W Filter Toggle
+        bwBtn.addEventListener('click', () => {
+            isBW = !isBW;
+            if (isBW) {
+                video.classList.add('grayscale');
+                bwBtn.style.background = 'rgba(0, 255, 255, 0.5)';
+                bwBtn.textContent = 'Color Mode';
+            } else {
+                video.classList.remove('grayscale');
+                bwBtn.style.background = 'rgba(255, 255, 255, 0.2)';
+                bwBtn.textContent = 'B&W Filter';
+            }
+        });
+
+        // Camera Selection
+        async function getCameras() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                
+                cameraSelect.innerHTML = '';
+                videoDevices.forEach(device => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.text = device.label || `Camera ${cameraSelect.length + 1}`;
+                    cameraSelect.appendChild(option);
+                });
+
+                if (videoDevices.length === 0) {
+                    const option = document.createElement('option');
+                    option.text = "No cameras found";
+                    cameraSelect.appendChild(option);
+                }
+            } catch (err) {
+                console.error("Error listing cameras:", err);
+            }
+        }
+
+        cameraSelect.addEventListener('change', () => {
+            startCamera(cameraSelect.value);
+        });
+
+        // Resize canvas to match window
+        function resizeCanvas() {
+            overlay.width = window.innerWidth;
+            overlay.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Determine backend URL
+        function getBackendUrl() {
+            const port = 8000;
+            const hostname = window.location.hostname;
+            const protocol = window.location.protocol;
+            
+            if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                return `${protocol}//${hostname}:${port}/detect`;
+            }
+            
+            if (hostname.includes('-3000')) {
+                const newHostname = hostname.replace('-3000', `-${port}`);
+                return `${protocol}//${newHostname}/detect`;
+            }
+            
+            return `http://localhost:${port}/detect`;
+        }
+
+        const API_URL = getBackendUrl();
+        console.log('Using API URL:', API_URL);
+
+        // Start Camera
+        async function startCamera(deviceId = null) {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+
+            const constraints = {
+                video: {
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
+            };
+
+            if (deviceId) {
+                constraints.video.deviceId = { exact: deviceId };
+            } else {
+                constraints.video.facingMode = 'user';
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                currentStream = stream;
+                video.srcObject = stream;
+                
+                // Wait for video to be ready
+                video.onloadedmetadata = () => {
+                    loadingScreen.style.opacity = '0';
+                    setTimeout(() => {
+                        loadingScreen.style.display = 'none';
+                        isRunning = true;
+                        detectFrame();
+                    }, 500);
+                };
+
+                // Refresh camera list if we just got permission
+                if (!deviceId) {
+                    getCameras();
+                }
+            } catch (err) {
+                console.error('Error accessing camera:', err);
+                loadingScreen.innerHTML = `
+                    <h2 style="color: #ff4444">Camera Error</h2>
+                    <p>${err.message}</p>
+                    <p>Please ensure camera permissions are allowed and refresh.</p>
+                `;
+            }
+        }
+
+        function detectFrame() {
+            if (!isRunning) return;
+            if (processing) {
+                requestAnimationFrame(detectFrame);
+                return;
+            }
+
+            processing = true;
+            statusDiv.textContent = 'Processing...';
+            
+            // Draw current video frame to hidden canvas
+            captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+            
+            captureCanvas.toBlob(blob => {
+                const formData = new FormData();
+                formData.append('file', blob, 'capture.jpg');
+
+                fetch(API_URL, {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    // Clear previous drawings
+                    ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+                    // Draw Objects (YOLOX)
+                    if (data.objects && data.objects.length > 0) {
+                        data.objects.forEach(obj => {
+                            // Calculate scaling factors (same logic as faces)
+                            const videoRatio = video.videoWidth / video.videoHeight;
+                            const screenRatio = overlay.width / overlay.height;
+                            
+                            let renderWidth, renderHeight, startX, startY;
+                            
+                            if (screenRatio > videoRatio) {
+                                renderWidth = overlay.width;
+                                renderHeight = overlay.width / videoRatio;
+                                startX = 0;
+                                startY = (overlay.height - renderHeight) / 2;
+                            } else {
+                                renderHeight = overlay.height;
+                                renderWidth = overlay.height * videoRatio;
+                                startX = (overlay.width - renderWidth) / 2;
+                                startY = 0;
+                            }
+
+                            const scaleX = renderWidth / captureCanvas.width;
+                            const scaleY = renderHeight / captureCanvas.height;
+
+                            let x = obj.box[0] * scaleX + startX;
+                            let y = obj.box[1] * scaleY + startY;
+                            let w = (obj.box[2] - obj.box[0]) * scaleX;
+                            let h = (obj.box[3] - obj.box[1]) * scaleY;
+
+                            // Mirror X
+                            const relativeX = x - startX;
+                            const mirroredRelativeX = renderWidth - relativeX - w;
+                            x = startX + mirroredRelativeX;
+
+                            // Draw Object Box (Yellow)
+                            ctx.strokeStyle = '#FFFF00';
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(x, y, w, h);
+
+                            // Draw Object Label
+                            ctx.fillStyle = 'rgba(255, 255, 0, 0.8)';
+                            ctx.font = 'bold 16px Arial';
+                            const label = `${obj.class} ${(obj.score * 100).toFixed(0)}%`;
+                            const textWidth = ctx.measureText(label).width;
+                            ctx.fillRect(x, y - 25, textWidth + 10, 25);
+                            ctx.fillStyle = '#000000';
+                            ctx.fillText(label, x + 5, y - 7);
+                        });
+                    }
+
+                    if (data.results && data.results.length > 0) {
+                        statusDiv.textContent = `Detected: ${data.results.length} face(s)`;
+                        
+                        data.results.forEach(result => {
+                            // Calculate scaling factors
+                            // The video is displayed with object-fit: cover, so we need to calculate the actual displayed dimensions
+                            const videoRatio = video.videoWidth / video.videoHeight;
+                            const screenRatio = overlay.width / overlay.height;
+                            
+                            let renderWidth, renderHeight, startX, startY;
+                            
+                            if (screenRatio > videoRatio) {
+                                renderWidth = overlay.width;
+                                renderHeight = overlay.width / videoRatio;
+                                startX = 0;
+                                startY = (overlay.height - renderHeight) / 2;
+                            } else {
+                                renderHeight = overlay.height;
+                                renderWidth = overlay.height * videoRatio;
+                                startX = (overlay.width - renderWidth) / 2;
+                                startY = 0;
+                            }
+
+                            // Map coordinates from 320x240 capture canvas to fullscreen overlay
+                            const scaleX = renderWidth / captureCanvas.width;
+                            const scaleY = renderHeight / captureCanvas.height;
+
+                            let x = result.face_box[0] * scaleX + startX;
+                            let y = result.face_box[1] * scaleY + startY;
+                            let w = (result.face_box[2] - result.face_box[0]) * scaleX;
+                            let h = (result.face_box[3] - result.face_box[1]) * scaleY;
+
+                            // Mirror X coordinate relative to the rendered video area
+                            // New X = (Start X + Render Width) - (X - Start X) - Width
+                            // Simplified: 2 * Start X + Render Width - X - Width
+                            // But since we are mirroring the whole video element with CSS, 
+                            // we actually need to mirror the coordinates logically if we want them to match the visual mirror.
+                            // Wait, if CSS transforms the video, the canvas is NOT transformed.
+                            // So we need to draw on the canvas as if it was mirrored.
+                            
+                            // Mirror logic for fullscreen 'cover' video:
+                            // The video is visually flipped.
+                            // The coordinates we get are from the raw (unflipped) frame.
+                            // We need to flip the X coordinate relative to the center of the screen.
+                            
+                            // Let's try a simpler approach: Mirror the canvas context too?
+                            // No, text would be backwards.
+                            
+                            // Calculate mirrored X
+                            // The 'x' we calculated above is where it would be if video wasn't mirrored.
+                            // The center of the video is startX + renderWidth/2.
+                            // Distance from center = x + w/2 - center.
+                            // New center distance = -(x + w/2 - center).
+                            // It's easier to just flip relative to the screen width if we assume full coverage?
+                            // No, we must flip relative to the rendered video frame.
+                            
+                            // Correct math for mirroring within the rendered video rect:
+                            // relativeX = x - startX
+                            // mirroredRelativeX = renderWidth - relativeX - w
+                            // finalX = startX + mirroredRelativeX
+                            
+                            const relativeX = x - startX;
+                            const mirroredRelativeX = renderWidth - relativeX - w;
+                            x = startX + mirroredRelativeX;
+
+                            const gender = result.gender;
+                            const age = result.age;
+                            const isNew = result.is_new;
+
+                            // Draw Path (Movement History)
+                            if (result.path && result.path.length > 1) {
+                                ctx.beginPath();
+                                ctx.strokeStyle = isNew ? '#00FFFF' : '#00FF00';
+                                ctx.lineWidth = 3;
+                                
+                                result.path.forEach((point, index) => {
+                                    // Map path points (which are in captureCanvas coords) to screen coords
+                                    let px = point[0] * scaleX + startX;
+                                    let py = point[1] * scaleY + startY;
+                                    
+                                    // Mirror path points
+                                    let relPx = px - startX;
+                                    let mirRelPx = renderWidth - relPx; 
+                                    px = startX + mirRelPx;
+
+                                    if (index === 0) ctx.moveTo(px, py);
+                                    else ctx.lineTo(px, py);
+                                });
+                                ctx.stroke();
+                            }
+
+                            // Choose color based on status
+                            // Cyan for New Person, Green for Returning Person
+                            const boxColor = isNew ? '#00FFFF' : '#00FF00';
+                            const textColor = '#000000';
+
+                            // Draw bounding box
+                            ctx.strokeStyle = boxColor;
+                            ctx.lineWidth = 4;
+                            ctx.strokeRect(x, y, w, h);
+
+                            // Draw text background
+                            const text = `${gender}, ${age}`;
+                            const idText = `${result.person_id} (Scans: ${result.visits})`;
+                            const statusText = isNew ? "NEW VISITOR" : "RETURNING";
+                            
+                            ctx.font = 'bold 24px Arial';
+                            const textWidth = Math.max(
+                                ctx.measureText(text).width, 
+                                ctx.measureText(idText).width,
+                                ctx.measureText(statusText).width
+                            );
+                            const padding = 10;
+                            const boxHeight = 100; // Increased for three lines
+                            
+                            ctx.fillStyle = isNew ? 'rgba(0, 255, 255, 0.8)' : 'rgba(0, 255, 0, 0.8)';
+                            ctx.fillRect(x, y - boxHeight, textWidth + padding * 2, boxHeight);
+
+                            // Draw text
+                            ctx.fillStyle = textColor;
+                            ctx.fillText(statusText, x + padding, y - 70);
+                            ctx.fillText(idText, x + padding, y - 40);
+                            ctx.fillText(text, x + padding, y - 10);
+                        });
+                    } else {
+                        statusDiv.textContent = 'Scanning...';
+                    }
+                })
+                .catch(err => {
+                    console.error('Error:', err);
+                    statusDiv.textContent = 'Connection Error';
+                })
+                .finally(() => {
+                    processing = false;
+                    if (isRunning) {
+                        setTimeout(() => requestAnimationFrame(detectFrame), 50);
+                    }
+                });
+            }, 'image/jpeg', 0.6);
+        }
+
+        // Start everything
+        startCamera();
+    </script>
+</body>
+</html>

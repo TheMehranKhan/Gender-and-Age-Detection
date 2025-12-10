@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Surveillance Dashboard</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
+
+        body {
+            background-color: #f0f0f0;
+            color: #333;
+            font-family: 'Roboto', sans-serif;
+            margin: 0;
+            padding: 20px;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            margin: 0;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #000;
+            font-weight: 700;
+        }
+
+        .sponsors {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .sponsor-logo {
+            height: 40px;
+            filter: grayscale(100%) brightness(0); /* Make logos black */
+            opacity: 0.7;
+            transition: all 0.3s;
+        }
+
+        .sponsor-logo:hover {
+            opacity: 1;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: bold;
+            color: #2ecc71;
+        }
+
+        .blink {
+            width: 10px;
+            height: 10px;
+            background-color: #2ecc71;
+            border-radius: 50%;
+            animation: blink 2s infinite;
+        }
+
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            position: relative;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            border: 1px solid #eee;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 15px;
+            margin-bottom: 15px;
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #000;
+        }
+
+        .card-body {
+            font-size: 0.95em;
+            line-height: 1.6;
+            color: #555;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .label {
+            color: #888;
+            font-weight: 500;
+        }
+
+        .value {
+            color: #000;
+            font-weight: 700;
+        }
+
+        .scan-count {
+            font-size: 2.5em;
+            text-align: center;
+            margin: 20px 0;
+            color: #000;
+            font-weight: 300;
+        }
+
+        .scan-label {
+            text-align: center;
+            font-size: 0.8em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+            margin-bottom: 20px;
+        }
+
+        .timestamp {
+            font-size: 0.8em;
+            color: #aaa;
+            margin-top: 15px;
+            text-align: right;
+            font-style: italic;
+        }
+
+        #nav-btn {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: #000;
+            color: #fff;
+            border: none;
+            padding: 12px 25px;
+            cursor: pointer;
+            font-family: 'Roboto', sans-serif;
+            text-transform: uppercase;
+            font-weight: bold;
+            border-radius: 30px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            transition: all 0.3s;
+            z-index: 1000;
+        }
+
+        #nav-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 6px 15px rgba(0,0,0,0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>Visitor Database</h1>
+                <div class="status-indicator">
+                    <div class="blink"></div>
+                    <span>LIVE FEED ACTIVE</span>
+                </div>
+            </div>
+            <div class="sponsors">
+                <img src="logo1.png" class="sponsor-logo" alt="Sponsor 1">
+                <img src="logo4.png" class="sponsor-logo" alt="Sponsor 2">
+            </div>
+        </header>
+
+        <div id="grid" class="grid">
+            <!-- Cards will be injected here -->
+        </div>
+    </div>
+
+    <button id="nav-btn" onclick="window.location.href='/'">Return to Camera</button>
+
+    <script>
+        function getBackendUrl() {
+            const port = 8000;
+            const hostname = window.location.hostname;
+            const protocol = window.location.protocol;
+            
+            if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                return `${protocol}//${hostname}:${port}/people`;
+            }
+            
+            if (hostname.includes('-3000')) {
+                const newHostname = hostname.replace('-3000', `-${port}`);
+                return `${protocol}//${newHostname}/people`;
+            }
+            
+            return `http://localhost:${port}/people`;
+        }
+
+        const API_URL = getBackendUrl();
+
+        function formatDate(isoString) {
+            if (!isoString) return 'N/A';
+            const date = new Date(isoString);
+            return date.toLocaleTimeString() + ' ' + date.toLocaleDateString();
+        }
+
+        function updateDashboard() {
+            fetch(API_URL)
+                .then(response => response.json())
+                .then(data => {
+                    const grid = document.getElementById('grid');
+                    grid.innerHTML = ''; // Clear current grid
+
+                    data.forEach(person => {
+                        const card = document.createElement('div');
+                        card.className = 'card';
+                        
+                        // Determine threat level based on visits (just for fun UI)
+                        let threatLevel = 'LOW';
+                        let threatColor = '#2ecc71';
+                        if (person.visits > 5) { threatLevel = 'MEDIUM'; threatColor = '#f1c40f'; }
+                        if (person.visits > 10) { threatLevel = 'HIGH'; threatColor = '#e74c3c'; }
+
+                        card.innerHTML = `
+                            <div class="card-header">
+                                <span>${person.id}</span>
+                                <span style="color: ${threatColor}; font-size: 0.8em; padding: 2px 8px; border: 1px solid ${threatColor}; border-radius: 4px;">${threatLevel}</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="scan-count">${person.visits}</div>
+                                <div class="scan-label">Total Scans</div>
+                                <hr style="border-color: #eee; margin: 15px 0;">
+                                <div class="stat-row">
+                                    <span class="label">GENDER:</span>
+                                    <span class="value">${person.gender}</span>
+                                </div>
+                                <div class="stat-row">
+                                    <span class="label">EST. AGE:</span>
+                                    <span class="value">${person.age}</span>
+                                </div>
+                                <div class="timestamp">
+                                    Last Seen: ${formatDate(person.last_seen)}
+                                </div>
+                            </div>
+                        `;
+                        grid.appendChild(card);
+                    });
+                })
+                .catch(err => console.error('Error fetching data:', err));
+        }
+
+        // Update every 2 seconds
+        updateDashboard();
+        setInterval(updateDashboard, 2000);
+    </script>
+</body>
+</html>
