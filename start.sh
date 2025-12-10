@@ -25,7 +25,7 @@ sleep 2
 
 # Start Frontend
 echo "Starting Frontend..."
-cd frontend && python -m http.server 3000 &
+python frontend/server.py &
 FRONTEND_PID=$!
 
 echo "Backend running on PID $BACKEND_PID"
