@@ -39,9 +39,9 @@ We are proud to be supported by:
 - **Person Re-identification**: SFace model recognizes returning visitors. <li>argparse</li>
 
 - **Object Detection**: YOLOX-S model detects 80+ types of objects (people, cars, etc.).  
-
+- **Advanced AI Analysis**: DeepFace integration for Emotion Recognition and Race Detection.
+- **Liveness Detection**: Temporal analysis to verify live presence.
 - **Path Tracking**: Visualizes the movement history of individuals.       pip install argparse
-
 - **Visitor Database**: Tracks visit counts and timestamps for each unique person.</ul>
 
 - **Dual Interface**:
