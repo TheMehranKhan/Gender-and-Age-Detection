@@ -116,6 +116,17 @@
             margin-right: 10px;
             cursor: pointer;
         }
+
+        label {
+            color: white;
+            margin-left: 10px;
+            font-family: Arial;
+            font-size: 14px;
+            cursor: pointer;
+            background: rgba(0,0,0,0.5);
+            padding: 5px;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
@@ -129,6 +140,9 @@
         <select id="cameraSelect"></select>
         <button id="bwBtn">B&W Filter</button>
         <button onclick="window.location.href='/dashboard.html'" style="margin-left: 10px;">View Database</button>
+        <label>
+            <input type="checkbox" id="deepfaceToggle" style="vertical-align: middle;"> Advanced AI
+        </label>
     </div>
 
     <div id="container">
@@ -148,6 +162,7 @@
         const statusDiv = document.getElementById('status');
         const bwBtn = document.getElementById('bwBtn');
         const cameraSelect = document.getElementById('cameraSelect');
+        const deepfaceToggle = document.getElementById('deepfaceToggle');
         
         const ctx = overlay.getContext('2d');
         const captureCtx = captureCanvas.getContext('2d');
@@ -293,7 +308,13 @@
                 const formData = new FormData();
                 formData.append('file', blob, 'capture.jpg');
 
-                fetch(API_URL, {
+                const url = new URL(API_URL);
+                const deepfaceToggle = document.getElementById('deepfaceToggle');
+                if (deepfaceToggle && deepfaceToggle.checked) {
+                    url.searchParams.append('enable_deepface', 'true');
+                }
+
+                fetch(url, {
                     method: 'POST',
                     body: formData
                 })
@@ -458,23 +479,42 @@
                             const idText = `${result.person_id} (Scans: ${result.visits})`;
                             const statusText = isNew ? "NEW VISITOR" : "RETURNING";
                             
+                            // New Info
+                            let extraText = "";
+                            if (result.emotion && result.emotion !== "Unknown") {
+                                extraText = `${result.emotion} | ${result.race}`;
+                            }
+                            if (result.liveness) {
+                                extraText += (extraText ? " | " : "") + result.liveness;
+                            }
+
                             ctx.font = 'bold 24px Arial';
                             const textWidth = Math.max(
                                 ctx.measureText(text).width, 
                                 ctx.measureText(idText).width,
-                                ctx.measureText(statusText).width
+                                ctx.measureText(statusText).width,
+                                ctx.measureText(extraText).width
                             );
                             const padding = 10;
-                            const boxHeight = 100; // Increased for three lines
+                            let boxHeight = 100; 
+                            if (extraText) boxHeight += 30; // Add space for extra line
                             
                             ctx.fillStyle = isNew ? 'rgba(0, 255, 255, 0.8)' : 'rgba(0, 255, 0, 0.8)';
                             ctx.fillRect(x, y - boxHeight, textWidth + padding * 2, boxHeight);
 
                             // Draw text
                             ctx.fillStyle = textColor;
-                            ctx.fillText(statusText, x + padding, y - 70);
-                            ctx.fillText(idText, x + padding, y - 40);
-                            ctx.fillText(text, x + padding, y - 10);
+                            let currentY = y - boxHeight + 30;
+                            ctx.fillText(statusText, x + padding, currentY);
+                            currentY += 30;
+                            ctx.fillText(idText, x + padding, currentY);
+                            currentY += 30;
+                            ctx.fillText(text, x + padding, currentY);
+                            
+                            if (extraText) {
+                                currentY += 30;
+                                ctx.fillText(extraText, x + padding, currentY);
+                            }
                         });
                     } else {
                         statusDiv.textContent = 'Scanning...';

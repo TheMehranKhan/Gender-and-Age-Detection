@@ -25,6 +25,15 @@ import os
 from datetime import datetime
 from PIL import Image
 
+# Try to import DeepFace
+try:
+    from deepface import DeepFace
+    DEEPFACE_AVAILABLE = True
+    print("DeepFace is available.")
+except ImportError:
+    DEEPFACE_AVAILABLE = False
+    print("DeepFace is NOT available. Install with 'pip install deepface tf-keras'")
+
 app = FastAPI(title="Gender and Age Detection API")
 
 app.add_middleware(
@@ -181,7 +190,7 @@ def get_person_id(embedding):
     return None, max_score
 
 @app.post("/detect")
-async def detect_gender_age(file: UploadFile = File(...)):
+async def detect_gender_age(file: UploadFile = File(...), enable_deepface: bool = False):
     contents = await file.read()
     nparr = np.frombuffer(contents, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -301,9 +310,39 @@ async def detect_gender_age(file: UploadFile = File(...)):
                 people_db[person_id]['gender'] = gender
                 people_db[person_id]['age'] = age
 
+            # --- DeepFace Analysis (Emotion & Race) ---
+            emotion = people_db[person_id].get('emotion', 'Unknown')
+            race = people_db[person_id].get('race', 'Unknown')
+
+            if DEEPFACE_AVAILABLE and enable_deepface and (emotion == 'Unknown' or is_new):
+                padding = 20
+                face_img = img[max(0, y-padding):min(y+h+padding, height),
+                            max(0, x-padding):min(x+w+padding, width)]
+                
+                if face_img.size > 0:
+                    try:
+                        # DeepFace analysis
+                        analysis = DeepFace.analyze(face_img, actions=['emotion', 'race'], enforce_detection=False, silent=True)
+                        if analysis:
+                            emotion = analysis[0]['dominant_emotion']
+                            race = analysis[0]['dominant_race']
+                            people_db[person_id]['emotion'] = emotion
+                            people_db[person_id]['race'] = race
+                    except Exception as e:
+                        print(f"DeepFace Error: {e}")
+
+            # --- Liveness Detection (Temporal Heuristic) ---
+            liveness = "Verifying..."
+            path_len = len(people_db[person_id].get('path', []))
+            if path_len > 15:
+                liveness = "Live"
+            
             results.append({
                 "gender": gender,
                 "age": age,
+                "emotion": emotion,
+                "race": race,
+                "liveness": liveness,
                 "face_box": [int(x), int(y), int(x+w), int(y+h)], # Format for frontend
                 "person_id": person_id,
                 "visits": people_db[person_id]["visits"],
