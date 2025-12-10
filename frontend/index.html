@@ -83,10 +83,70 @@
             filter: grayscale(100%);
         }
 
-        #controls {
+        #sidebar {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 350px;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            border-left: 1px solid rgba(255, 255, 255, 0.2);
+            overflow-y: auto;
+            z-index: 90;
+            padding: 20px;
+            box-sizing: border-box;
+            color: white;
+            font-family: 'Roboto', sans-serif;
+        }
+
+        #sidebar h2 {
+            margin-top: 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            padding-bottom: 10px;
+            font-size: 18px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .person-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .person-card h3 {
+            margin: 0 0 5px 0;
+            font-size: 16px;
+            color: #2ecc71;
+        }
+
+        .person-card p {
+            margin: 2px 0;
+            font-size: 12px;
+            color: #ccc;
+        }
+
+        .person-card .meta {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 5px;
+            font-size: 10px;
+            color: #888;
+        }
+
+        #top-controls {
             position: absolute;
             top: 20px;
-            right: 20px;
+            left: 20px;
+            z-index: 100;
+        }
+
+        #bottom-controls {
+            position: absolute;
+            top: 20px;
+            right: 370px; /* Adjusted for sidebar */
             z-index: 100;
         }
 
@@ -136,23 +196,39 @@
         <p>Please allow camera access</p>
     </div>
 
-    <div id="controls">
-        <select id="cameraSelect"></select>
-        <button id="bwBtn">B&W Filter</button>
-        <button onclick="window.location.href='/dashboard.html'" style="margin-left: 10px;">View Database</button>
-        <label>
-            <input type="checkbox" id="deepfaceToggle" style="vertical-align: middle;"> Advanced AI
-        </label>
-    </div>
-
     <div id="container">
         <video id="video" autoplay playsinline></video>
         <canvas id="overlay"></canvas>
         <div id="status">Initializing...</div>
+        
+        <!-- Top Controls -->
+        <div id="top-controls" class="ui-element">
+            <select id="cameraSelect"></select>
+            <button id="bwBtn">B&W Filter</button>
+            <button onclick="window.location.href='/dashboard.html'" style="margin-left: 10px;">View Database</button>
+            <button id="hideUiBtn">Hide UI</button>
+        </div>
+
+        <!-- Bottom Controls -->
+        <div id="bottom-controls" class="ui-element">
+            <button id="toggle-cam">Stop Camera</button>
+            <button id="toggle-detection">Stop Detection</button>
+            <button id="toggle-deepface">Enable DeepFace</button>
+        </div>
+
+        <div id="sidebar" class="ui-element">
+            <h2>Live Feed</h2>
+            <div id="people-list">
+                <!-- People cards will be added here -->
+            </div>
+        </div>
+        
+        <!-- Floating Show UI Button (Hidden by default) -->
+        <button id="showUiBtn" style="display: none; position: absolute; top: 20px; right: 20px; z-index: 200;">Show UI</button>
     </div>
 
-    <!-- Hidden canvas for capturing frames (smaller for speed) -->
-    <canvas id="captureCanvas" width="320" height="240" style="display:none;"></canvas>
+    <!-- Hidden canvas for capturing frames -->
+    <canvas id="captureCanvas" width="640" height="480" style="display:none;"></canvas>
 
     <script>
         const video = document.getElementById('video');
@@ -160,19 +236,51 @@
         const captureCanvas = document.getElementById('captureCanvas');
         const loadingScreen = document.getElementById('loading');
         const statusDiv = document.getElementById('status');
+        
+        // UI Elements
+        const topControls = document.getElementById('top-controls');
+        const bottomControls = document.getElementById('bottom-controls');
+        const sidebar = document.getElementById('sidebar');
+        const showUiBtn = document.getElementById('showUiBtn');
+        const hideUiBtn = document.getElementById('hideUiBtn');
+        const peopleList = document.getElementById('people-list');
+        
+        // Buttons
         const bwBtn = document.getElementById('bwBtn');
         const cameraSelect = document.getElementById('cameraSelect');
-        const deepfaceToggle = document.getElementById('deepfaceToggle');
-        
+        const toggleCamBtn = document.getElementById('toggle-cam');
+        const toggleDetectionBtn = document.getElementById('toggle-detection');
+        const toggleDeepFaceBtn = document.getElementById('toggle-deepface');
+
         const ctx = overlay.getContext('2d');
         const captureCtx = captureCanvas.getContext('2d');
 
+        // State
         let isRunning = false;
-        let processing = false;
+        let isDetectionRunning = true;
+        let isDeepFaceEnabled = false;
         let isBW = false;
         let currentStream = null;
+        let lastFrameTime = 0;
+        const frameInterval = 100; // 10 FPS
+        const detectedPeople = new Map();
 
-        // B&W Filter Toggle
+        // --- UI Logic ---
+
+        // Hide/Show UI
+        function toggleUI(show) {
+            const display = show ? 'block' : 'none';
+            topControls.style.display = display;
+            bottomControls.style.display = display;
+            sidebar.style.display = display;
+            statusDiv.style.display = display;
+            showUiBtn.style.display = show ? 'none' : 'block';
+        }
+
+        hideUiBtn.addEventListener('click', () => toggleUI(false));
+        showUiBtn.addEventListener('click', () => toggleUI(true));
+
+        // B&W Filter
         bwBtn.addEventListener('click', () => {
             isBW = !isBW;
             if (isBW) {
@@ -186,7 +294,44 @@
             }
         });
 
-        // Camera Selection
+        // DeepFace Toggle
+        toggleDeepFaceBtn.addEventListener('click', () => {
+            isDeepFaceEnabled = !isDeepFaceEnabled;
+            if (isDeepFaceEnabled) {
+                toggleDeepFaceBtn.style.background = 'rgba(0, 255, 0, 0.5)';
+                toggleDeepFaceBtn.textContent = 'Disable DeepFace';
+            } else {
+                toggleDeepFaceBtn.style.background = 'rgba(255, 255, 255, 0.2)';
+                toggleDeepFaceBtn.textContent = 'Enable DeepFace';
+            }
+        });
+
+        // Detection Toggle
+        toggleDetectionBtn.addEventListener('click', () => {
+            isDetectionRunning = !isDetectionRunning;
+            toggleDetectionBtn.textContent = isDetectionRunning ? 'Stop Detection' : 'Start Detection';
+            toggleDetectionBtn.style.background = isDetectionRunning ? 'rgba(255, 255, 255, 0.2)' : 'rgba(255, 0, 0, 0.5)';
+            if (isDetectionRunning) detectFrame();
+        });
+
+        // Camera Toggle
+        toggleCamBtn.addEventListener('click', () => {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+                currentStream = null;
+                video.srcObject = null;
+                toggleCamBtn.textContent = 'Start Camera';
+                toggleCamBtn.style.background = 'rgba(255, 0, 0, 0.5)';
+                isRunning = false;
+            } else {
+                startCamera(cameraSelect.value);
+                toggleCamBtn.textContent = 'Stop Camera';
+                toggleCamBtn.style.background = 'rgba(255, 255, 255, 0.2)';
+            }
+        });
+
+        // --- Camera Logic ---
+
         async function getCameras() {
             try {
                 const devices = await navigator.mediaDevices.enumerateDevices();
@@ -214,36 +359,6 @@
             startCamera(cameraSelect.value);
         });
 
-        // Resize canvas to match window
-        function resizeCanvas() {
-            overlay.width = window.innerWidth;
-            overlay.height = window.innerHeight;
-        }
-        window.addEventListener('resize', resizeCanvas);
-        resizeCanvas();
-
-        // Determine backend URL
-        function getBackendUrl() {
-            const port = 8000;
-            const hostname = window.location.hostname;
-            const protocol = window.location.protocol;
-            
-            if (hostname === 'localhost' || hostname === '127.0.0.1') {
-                return `${protocol}//${hostname}:${port}/detect`;
-            }
-            
-            if (hostname.includes('-3000')) {
-                const newHostname = hostname.replace('-3000', `-${port}`);
-                return `${protocol}//${newHostname}/detect`;
-            }
-            
-            return `http://localhost:${port}/detect`;
-        }
-
-        const API_URL = getBackendUrl();
-        console.log('Using API URL:', API_URL);
-
-        // Start Camera
         async function startCamera(deviceId = null) {
             if (currentStream) {
                 currentStream.getTracks().forEach(track => track.stop());
@@ -267,7 +382,6 @@
                 currentStream = stream;
                 video.srcObject = stream;
                 
-                // Wait for video to be ready
                 video.onloadedmetadata = () => {
                     loadingScreen.style.opacity = '0';
                     setTimeout(() => {
@@ -277,263 +391,222 @@
                     }, 500);
                 };
 
-                // Refresh camera list if we just got permission
-                if (!deviceId) {
-                    getCameras();
-                }
+                if (!deviceId) getCameras();
             } catch (err) {
                 console.error('Error accessing camera:', err);
                 loadingScreen.innerHTML = `
                     <h2 style="color: #ff4444">Camera Error</h2>
                     <p>${err.message}</p>
-                    <p>Please ensure camera permissions are allowed and refresh.</p>
                 `;
             }
         }
 
-        function detectFrame() {
-            if (!isRunning) return;
-            if (processing) {
+        // --- Detection Logic ---
+
+        function getBackendUrl() {
+            const port = 8000;
+            const hostname = window.location.hostname;
+            const protocol = window.location.protocol;
+            
+            if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                return `${protocol}//${hostname}:${port}/detect`;
+            }
+            if (hostname.includes('-3000')) {
+                const newHostname = hostname.replace('-3000', `-${port}`);
+                return `${protocol}//${newHostname}/detect`;
+            }
+            return `http://localhost:${port}/detect`;
+        }
+
+        const API_URL = getBackendUrl();
+
+        async function detectFrame() {
+            if (!isRunning || !isDetectionRunning) return;
+
+            const now = Date.now();
+            if (now - lastFrameTime < frameInterval) {
                 requestAnimationFrame(detectFrame);
                 return;
             }
+            lastFrameTime = now;
 
-            processing = true;
-            statusDiv.textContent = 'Processing...';
-            
-            // Draw current video frame to hidden canvas
-            captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
-            
-            captureCanvas.toBlob(blob => {
-                const formData = new FormData();
-                formData.append('file', blob, 'capture.jpg');
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                // Draw video to capture canvas (smaller for speed)
+                captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+                
+                captureCanvas.toBlob(async (blob) => {
+                    if (!blob) return;
 
-                const url = new URL(API_URL);
-                const deepfaceToggle = document.getElementById('deepfaceToggle');
-                if (deepfaceToggle && deepfaceToggle.checked) {
-                    url.searchParams.append('enable_deepface', 'true');
-                }
+                    const formData = new FormData();
+                    formData.append('file', blob, 'frame.jpg');
 
-                fetch(url, {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => response.json())
-                .then(data => {
-                    // Clear previous drawings
-                    ctx.clearRect(0, 0, overlay.width, overlay.height);
-
-                    // Draw Objects (YOLOX)
-                    if (data.objects && data.objects.length > 0) {
-                        data.objects.forEach(obj => {
-                            // Calculate scaling factors (same logic as faces)
-                            const videoRatio = video.videoWidth / video.videoHeight;
-                            const screenRatio = overlay.width / overlay.height;
-                            
-                            let renderWidth, renderHeight, startX, startY;
-                            
-                            if (screenRatio > videoRatio) {
-                                renderWidth = overlay.width;
-                                renderHeight = overlay.width / videoRatio;
-                                startX = 0;
-                                startY = (overlay.height - renderHeight) / 2;
-                            } else {
-                                renderHeight = overlay.height;
-                                renderWidth = overlay.height * videoRatio;
-                                startX = (overlay.width - renderWidth) / 2;
-                                startY = 0;
-                            }
-
-                            const scaleX = renderWidth / captureCanvas.width;
-                            const scaleY = renderHeight / captureCanvas.height;
-
-                            let x = obj.box[0] * scaleX + startX;
-                            let y = obj.box[1] * scaleY + startY;
-                            let w = (obj.box[2] - obj.box[0]) * scaleX;
-                            let h = (obj.box[3] - obj.box[1]) * scaleY;
-
-                            // Mirror X
-                            const relativeX = x - startX;
-                            const mirroredRelativeX = renderWidth - relativeX - w;
-                            x = startX + mirroredRelativeX;
-
-                            // Draw Object Box (Yellow)
-                            ctx.strokeStyle = '#FFFF00';
-                            ctx.lineWidth = 2;
-                            ctx.strokeRect(x, y, w, h);
-
-                            // Draw Object Label
-                            ctx.fillStyle = 'rgba(255, 255, 0, 0.8)';
-                            ctx.font = 'bold 16px Arial';
-                            const label = `${obj.class} ${(obj.score * 100).toFixed(0)}%`;
-                            const textWidth = ctx.measureText(label).width;
-                            ctx.fillRect(x, y - 25, textWidth + 10, 25);
-                            ctx.fillStyle = '#000000';
-                            ctx.fillText(label, x + 5, y - 7);
+                    try {
+                        const response = await fetch(`${API_URL}?enable_deepface=${isDeepFaceEnabled}`, {
+                            method: 'POST',
+                            body: formData
                         });
+
+                        if (response.ok) {
+                            const data = await response.json();
+                            drawResults(data);
+                            updateSidebar(data.results);
+                            statusDiv.textContent = `Running... Found ${data.results.length} faces.`;
+                        }
+                    } catch (err) {
+                        console.error("Network error", err);
                     }
-
-                    if (data.results && data.results.length > 0) {
-                        statusDiv.textContent = `Detected: ${data.results.length} face(s)`;
-                        
-                        data.results.forEach(result => {
-                            // Calculate scaling factors
-                            // The video is displayed with object-fit: cover, so we need to calculate the actual displayed dimensions
-                            const videoRatio = video.videoWidth / video.videoHeight;
-                            const screenRatio = overlay.width / overlay.height;
-                            
-                            let renderWidth, renderHeight, startX, startY;
-                            
-                            if (screenRatio > videoRatio) {
-                                renderWidth = overlay.width;
-                                renderHeight = overlay.width / videoRatio;
-                                startX = 0;
-                                startY = (overlay.height - renderHeight) / 2;
-                            } else {
-                                renderHeight = overlay.height;
-                                renderWidth = overlay.height * videoRatio;
-                                startX = (overlay.width - renderWidth) / 2;
-                                startY = 0;
-                            }
-
-                            // Map coordinates from 320x240 capture canvas to fullscreen overlay
-                            const scaleX = renderWidth / captureCanvas.width;
-                            const scaleY = renderHeight / captureCanvas.height;
-
-                            let x = result.face_box[0] * scaleX + startX;
-                            let y = result.face_box[1] * scaleY + startY;
-                            let w = (result.face_box[2] - result.face_box[0]) * scaleX;
-                            let h = (result.face_box[3] - result.face_box[1]) * scaleY;
-
-                            // Mirror X coordinate relative to the rendered video area
-                            // New X = (Start X + Render Width) - (X - Start X) - Width
-                            // Simplified: 2 * Start X + Render Width - X - Width
-                            // But since we are mirroring the whole video element with CSS, 
-                            // we actually need to mirror the coordinates logically if we want them to match the visual mirror.
-                            // Wait, if CSS transforms the video, the canvas is NOT transformed.
-                            // So we need to draw on the canvas as if it was mirrored.
-                            
-                            // Mirror logic for fullscreen 'cover' video:
-                            // The video is visually flipped.
-                            // The coordinates we get are from the raw (unflipped) frame.
-                            // We need to flip the X coordinate relative to the center of the screen.
-                            
-                            // Let's try a simpler approach: Mirror the canvas context too?
-                            // No, text would be backwards.
-                            
-                            // Calculate mirrored X
-                            // The 'x' we calculated above is where it would be if video wasn't mirrored.
-                            // The center of the video is startX + renderWidth/2.
-                            // Distance from center = x + w/2 - center.
-                            // New center distance = -(x + w/2 - center).
-                            // It's easier to just flip relative to the screen width if we assume full coverage?
-                            // No, we must flip relative to the rendered video frame.
-                            
-                            // Correct math for mirroring within the rendered video rect:
-                            // relativeX = x - startX
-                            // mirroredRelativeX = renderWidth - relativeX - w
-                            // finalX = startX + mirroredRelativeX
-                            
-                            const relativeX = x - startX;
-                            const mirroredRelativeX = renderWidth - relativeX - w;
-                            x = startX + mirroredRelativeX;
-
-                            const gender = result.gender;
-                            const age = result.age;
-                            const isNew = result.is_new;
-
-                            // Draw Path (Movement History)
-                            if (result.path && result.path.length > 1) {
-                                ctx.beginPath();
-                                ctx.strokeStyle = isNew ? '#00FFFF' : '#00FF00';
-                                ctx.lineWidth = 3;
-                                
-                                result.path.forEach((point, index) => {
-                                    // Map path points (which are in captureCanvas coords) to screen coords
-                                    let px = point[0] * scaleX + startX;
-                                    let py = point[1] * scaleY + startY;
-                                    
-                                    // Mirror path points
-                                    let relPx = px - startX;
-                                    let mirRelPx = renderWidth - relPx; 
-                                    px = startX + mirRelPx;
-
-                                    if (index === 0) ctx.moveTo(px, py);
-                                    else ctx.lineTo(px, py);
-                                });
-                                ctx.stroke();
-                            }
-
-                            // Choose color based on status
-                            // Cyan for New Person, Green for Returning Person
-                            const boxColor = isNew ? '#00FFFF' : '#00FF00';
-                            const textColor = '#000000';
-
-                            // Draw bounding box
-                            ctx.strokeStyle = boxColor;
-                            ctx.lineWidth = 4;
-                            ctx.strokeRect(x, y, w, h);
-
-                            // Draw text background
-                            const text = `${gender}, ${age}`;
-                            const idText = `${result.person_id} (Scans: ${result.visits})`;
-                            const statusText = isNew ? "NEW VISITOR" : "RETURNING";
-                            
-                            // New Info
-                            let extraText = "";
-                            if (result.emotion && result.emotion !== "Unknown") {
-                                extraText = `${result.emotion} | ${result.race}`;
-                            }
-                            if (result.liveness) {
-                                extraText += (extraText ? " | " : "") + result.liveness;
-                            }
-
-                            ctx.font = 'bold 24px Arial';
-                            const textWidth = Math.max(
-                                ctx.measureText(text).width, 
-                                ctx.measureText(idText).width,
-                                ctx.measureText(statusText).width,
-                                ctx.measureText(extraText).width
-                            );
-                            const padding = 10;
-                            let boxHeight = 100; 
-                            if (extraText) boxHeight += 30; // Add space for extra line
-                            
-                            ctx.fillStyle = isNew ? 'rgba(0, 255, 255, 0.8)' : 'rgba(0, 255, 0, 0.8)';
-                            ctx.fillRect(x, y - boxHeight, textWidth + padding * 2, boxHeight);
-
-                            // Draw text
-                            ctx.fillStyle = textColor;
-                            let currentY = y - boxHeight + 30;
-                            ctx.fillText(statusText, x + padding, currentY);
-                            currentY += 30;
-                            ctx.fillText(idText, x + padding, currentY);
-                            currentY += 30;
-                            ctx.fillText(text, x + padding, currentY);
-                            
-                            if (extraText) {
-                                currentY += 30;
-                                ctx.fillText(extraText, x + padding, currentY);
-                            }
-                        });
-                    } else {
-                        statusDiv.textContent = 'Scanning...';
-                    }
-                })
-                .catch(err => {
-                    console.error('Error:', err);
-                    statusDiv.textContent = 'Connection Error';
-                })
-                .finally(() => {
-                    processing = false;
-                    if (isRunning) {
-                        setTimeout(() => requestAnimationFrame(detectFrame), 50);
-                    }
-                });
-            }, 'image/jpeg', 0.6);
+                    
+                    requestAnimationFrame(detectFrame);
+                }, 'image/jpeg', 0.7);
+            } else {
+                requestAnimationFrame(detectFrame);
+            }
         }
 
-        // Start everything
+        function drawResults(data) {
+            // Clear overlay
+            ctx.clearRect(0, 0, overlay.width, overlay.height);
+            
+            // Calculate scaling
+            // Video is object-fit: cover, so we need to calculate displayed dimensions
+            const videoRatio = video.videoWidth / video.videoHeight;
+            const screenRatio = overlay.width / overlay.height;
+            
+            let renderWidth, renderHeight, startX, startY;
+            
+            if (screenRatio > videoRatio) {
+                renderWidth = overlay.width;
+                renderHeight = overlay.width / videoRatio;
+                startX = 0;
+                startY = (overlay.height - renderHeight) / 2;
+            } else {
+                renderHeight = overlay.height;
+                renderWidth = overlay.height * videoRatio;
+                startX = (overlay.width - renderWidth) / 2;
+                startY = 0;
+            }
+
+            const scaleX = renderWidth / captureCanvas.width;
+            const scaleY = renderHeight / captureCanvas.height;
+
+            // Draw Objects
+            if (data.objects) {
+                data.objects.forEach(obj => {
+                    let x = obj.box[0] * scaleX + startX;
+                    let y = obj.box[1] * scaleY + startY;
+                    let w = (obj.box[2] - obj.box[0]) * scaleX;
+                    let h = (obj.box[3] - obj.box[1]) * scaleY;
+
+                    // Mirror X
+                    const relativeX = x - startX;
+                    const mirroredRelativeX = renderWidth - relativeX - w;
+                    x = startX + mirroredRelativeX;
+
+                    ctx.strokeStyle = '#FFFF00';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x, y, w, h);
+                    
+                    ctx.fillStyle = '#FFFF00';
+                    ctx.font = '16px Arial';
+                    ctx.fillText(`${obj.class}`, x, y - 5);
+                });
+            }
+
+            // Draw Faces
+            if (data.results) {
+                data.results.forEach(person => {
+                    let x = person.face_box[0] * scaleX + startX;
+                    let y = person.face_box[1] * scaleY + startY;
+                    let w = (person.face_box[2] - person.face_box[0]) * scaleX;
+                    let h = (person.face_box[3] - person.face_box[1]) * scaleY;
+
+                    // Mirror X
+                    const relativeX = x - startX;
+                    const mirroredRelativeX = renderWidth - relativeX - w;
+                    x = startX + mirroredRelativeX;
+
+                    const isNew = person.is_new;
+                    const color = isNew ? '#00FFFF' : '#00FF00';
+
+                    // Box
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(x, y, w, h);
+
+                    // Info Box
+                    const info = [
+                        person.person_id,
+                        `Scans: ${person.visits}`,
+                        person.gender,
+                        person.emotion !== 'Unknown' ? person.emotion : ''
+                    ].filter(Boolean);
+
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                    ctx.fillRect(x, y - (info.length * 20 + 10), 200, info.length * 20 + 10);
+
+                    ctx.fillStyle = color;
+                    ctx.font = 'bold 16px Arial';
+                    info.forEach((line, i) => {
+                        ctx.fillText(line, x + 5, y - ((info.length - 1 - i) * 20) - 10);
+                    });
+                });
+            }
+        }
+
+        function updateSidebar(results) {
+            detectedPeople.forEach(p => p.seen = false);
+
+            results.forEach(person => {
+                const id = person.person_id;
+                const now = new Date().toLocaleTimeString();
+                
+                if (detectedPeople.has(id)) {
+                    const p = detectedPeople.get(id);
+                    p.seen = true;
+                    p.lastSeen = now;
+                    
+                    const card = document.getElementById(`card-${id}`);
+                    if (card) {
+                        card.querySelector('.visits').textContent = `Scans: ${person.visits}`;
+                        card.querySelector('.emotion').textContent = `Emotion: ${person.emotion}`;
+                    }
+                } else {
+                    detectedPeople.set(id, { seen: true });
+                    
+                    const card = document.createElement('div');
+                    card.className = 'person-card';
+                    card.id = `card-${id}`;
+                    card.innerHTML = `
+                        <h3>${id} <span style="font-size: 12px; color: #888;">(${person.gender})</span></h3>
+                        <p class="emotion">Emotion: ${person.emotion}</p>
+                        <p class="visits">Scans: ${person.visits}</p>
+                        <div class="meta">
+                            <span>First: ${now}</span>
+                            <span>Last: ${now}</span>
+                        </div>
+                    `;
+                    peopleList.prepend(card);
+                }
+            });
+
+            // Dim unseen
+            detectedPeople.forEach((p, id) => {
+                const card = document.getElementById(`card-${id}`);
+                if (card) {
+                    card.style.opacity = p.seen ? '1' : '0.5';
+                }
+            });
+        }
+
+        // Resize handling
+        function resizeCanvas() {
+            overlay.width = window.innerWidth;
+            overlay.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Start
         startCamera();
     </script>
 </body>

@@ -1,3 +1,8 @@
+import os
+# Force CPU usage for TensorFlow/DeepFace to avoid CUDA errors
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import cv2
@@ -190,7 +195,7 @@ def get_person_id(embedding):
     return None, max_score
 
 @app.post("/detect")
-async def detect_gender_age(file: UploadFile = File(...), enable_deepface: bool = False):
+async def detect_gender_age(file: UploadFile = File(...), enable_deepface: bool = True):
     contents = await file.read()
     nparr = np.frombuffer(contents, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -198,7 +203,7 @@ async def detect_gender_age(file: UploadFile = File(...), enable_deepface: bool 
     height, width, _ = img.shape
     
     # --- Object Detection (YOLOX) ---
-    input_shape = (640, 640)
+    input_shape = (416, 416)
     preprocessed_img, ratio = yolox_preprocess(img, input_shape)
     blob = cv2.dnn.blobFromImage(preprocessed_img)
     yolox_net.setInput(blob)
@@ -273,11 +278,11 @@ async def detect_gender_age(file: UploadFile = File(...), enable_deepface: bool 
                 people_db[person_id]["last_seen"] = datetime.now().isoformat()
             
             # Update Path
-            center_x = int(x + w / 2)
-            center_y = int(y + h / 2)
-            if 'path' not in people_db[person_id]:
-                people_db[person_id]['path'] = []
-            people_db[person_id]['path'].append([center_x, center_y])
+            # center_x = int(x + w / 2)
+            # center_y = int(y + h / 2)
+            # if 'path' not in people_db[person_id]:
+            #     people_db[person_id]['path'] = []
+            # people_db[person_id]['path'].append([center_x, center_y])
             
             # Age and Gender Detection
             # Optimization: Only run if not already in DB or if it's a new person
@@ -285,7 +290,8 @@ async def detect_gender_age(file: UploadFile = File(...), enable_deepface: bool 
             
             if 'gender' in people_db[person_id] and 'age' in people_db[person_id]:
                 gender = people_db[person_id]['gender']
-                age = people_db[person_id]['age']
+                # age = people_db[person_id]['age']
+                age = "Unknown" # Disabled for now
             else:
                 # Add padding for better age/gender detection context
                 padding = 20
@@ -302,9 +308,10 @@ async def detect_gender_age(file: UploadFile = File(...), enable_deepface: bool 
                     genderPreds = genderNet.forward()
                     gender = genderList[genderPreds[0].argmax()]
 
-                    ageNet.setInput(blob)
-                    agePreds = ageNet.forward()
-                    age = ageList[agePreds[0].argmax()]
+                    # ageNet.setInput(blob)
+                    # agePreds = ageNet.forward()
+                    # age = ageList[agePreds[0].argmax()]
+                    age = "Unknown" # Disabled for now
                 
                 # Store in DB
                 people_db[person_id]['gender'] = gender
@@ -333,9 +340,9 @@ async def detect_gender_age(file: UploadFile = File(...), enable_deepface: bool 
 
             # --- Liveness Detection (Temporal Heuristic) ---
             liveness = "Verifying..."
-            path_len = len(people_db[person_id].get('path', []))
-            if path_len > 15:
-                liveness = "Live"
+            # path_len = len(people_db[person_id].get('path', []))
+            # if path_len > 15:
+            #     liveness = "Live"
             
             results.append({
                 "gender": gender,
@@ -347,7 +354,7 @@ async def detect_gender_age(file: UploadFile = File(...), enable_deepface: bool 
                 "person_id": person_id,
                 "visits": people_db[person_id]["visits"],
                 "is_new": is_new,
-                "path": people_db[person_id]['path'][-20:] # Send last 20 points
+                "path": [] # people_db[person_id]['path'][-20:] # Send last 20 points
             })
 
     if faces is not None:
