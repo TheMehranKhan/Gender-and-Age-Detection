@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>People Database Statistics</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                margin: 20px;
+                background-color: #f4f4f4;
+            }
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+                background: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            }
+            h1 {
+                text-align: center;
+                color: #333;
+            }
+            .stats {
+                display: flex;
+                justify-content: space-around;
+                margin-bottom: 30px;
+            }
+            .stat {
+                text-align: center;
+                padding: 20px;
+                background: #e9e9e9;
+                border-radius: 8px;
+                flex: 1;
+                margin: 0 10px;
+            }
+            .stat h2 {
+                margin: 0;
+                font-size: 2em;
+                color: #007bff;
+            }
+            .stat p {
+                margin: 5px 0 0 0;
+                color: #666;
+            }
+            .charts {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: space-around;
+            }
+            .chart-container {
+                width: 45%;
+                margin-bottom: 20px;
+            }
+            @media (max-width: 768px) {
+                .charts {
+                    flex-direction: column;
+                }
+                .chart-container {
+                    width: 100%;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>People Database Statistics</h1>
+            <div class="stats">
+                <div class="stat">
+                    <h2 id="total-users">0</h2>
+                    <p>Total Users Scanned</p>
+                </div>
+                <div class="stat">
+                    <h2 id="average-age">0</h2>
+                    <p>Average Age</p>
+                </div>
+                <div class="stat">
+                    <h2 id="total-visits">0</h2>
+                    <p>Total Visits</p>
+                </div>
+            </div>
+            <div class="charts">
+                <div class="chart-container">
+                    <canvas id="genderChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="ageChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            async function loadData() {
+                try {
+                    const response = await fetch("./people_db_copy.json");
+                    const data = await response.json();
+                    processData(data);
+                } catch (error) {
+                    console.error("Error loading data:", error);
+                }
+            }
+
+            function parseAge(ageStr) {
+                if (ageStr === "Unknown") return null;
+                const match = ageStr.match(/\((\d+)-(\d+)\)/);
+                if (match) {
+                    const min = parseInt(match[1]);
+                    const max = parseInt(match[2]);
+                    return (min + max) / 2;
+                }
+                return null;
+            }
+
+            function processData(data) {
+                const people = Object.values(data);
+                const totalUsers = people.length;
+                let totalAge = 0;
+                let ageCount = 0;
+                let totalVisits = 0;
+                const genderCounts = { Male: 0, Female: 0, Unknown: 0 };
+                const ageBuckets = {
+                    "0-17": 0,
+                    "18-24": 0,
+                    "25-34": 0,
+                    "35-44": 0,
+                    "45-54": 0,
+                    "55-64": 0,
+                    "65+": 0,
+                };
+
+                people.forEach((person) => {
+                    totalVisits += person.visits || 0;
+                    const gender = person.gender || "Unknown";
+                    genderCounts[gender] = (genderCounts[gender] || 0) + 1;
+
+                    const age = parseAge(person.age);
+                    if (age !== null) {
+                        totalAge += age;
+                        ageCount++;
+                        if (age <= 17) ageBuckets["0-17"]++;
+                        else if (age <= 24) ageBuckets["18-24"]++;
+                        else if (age <= 34) ageBuckets["25-34"]++;
+                        else if (age <= 44) ageBuckets["35-44"]++;
+                        else if (age <= 54) ageBuckets["45-54"]++;
+                        else if (age <= 64) ageBuckets["55-64"]++;
+                        else ageBuckets["65+"]++;
+                    }
+                });
+
+                const averageAge =
+                    ageCount > 0 ? (totalAge / ageCount).toFixed(1) : "N/A";
+
+                // Update stats
+                document.getElementById("total-users").textContent = totalUsers;
+                document.getElementById("average-age").textContent = averageAge;
+                document.getElementById("total-visits").textContent =
+                    totalVisits;
+
+                // Gender Chart
+                const genderCtx = document
+                    .getElementById("genderChart")
+                    .getContext("2d");
+                new Chart(genderCtx, {
+                    type: "pie",
+                    data: {
+                        labels: Object.keys(genderCounts),
+                        datasets: [
+                            {
+                                data: Object.values(genderCounts),
+                                backgroundColor: ["#007bff", "#ff69b4", "#ccc"],
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: "Gender Distribution",
+                            },
+                        },
+                    },
+                });
+
+                // Age Chart
+                const ageCtx = document
+                    .getElementById("ageChart")
+                    .getContext("2d");
+                new Chart(ageCtx, {
+                    type: "bar",
+                    data: {
+                        labels: Object.keys(ageBuckets),
+                        datasets: [
+                            {
+                                label: "Number of People",
+                                data: Object.values(ageBuckets),
+                                backgroundColor: "#28a745",
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: "Age Group Distribution",
+                            },
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                            },
+                        },
+                    },
+                });
+            }
+
+            loadData();
+        </script>
+    </body>
+</html>

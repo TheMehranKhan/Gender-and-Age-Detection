@@ -12,12 +12,12 @@ cleanup() {
     exit
 }
 
-# Trap SIGINT (Ctrl+C)
-trap cleanup SIGINT
+# Trap signals for cleanup on exit or terminal close
+trap cleanup SIGINT SIGHUP SIGTERM
 
 # Start Backend
 echo "Starting Backend..."
-python backend/main.py &
+python3 backend/main.py &
 BACKEND_PID=$!
 
 # Wait a bit for backend to initialize
@@ -25,12 +25,12 @@ sleep 2
 
 # Start Frontend
 echo "Starting Frontend..."
-python frontend/server.py &
+python3 frontend/server.py &
 FRONTEND_PID=$!
 
 echo "Backend running on PID $BACKEND_PID"
 echo "Frontend running on PID $FRONTEND_PID"
-echo "Access Frontend at http://localhost:3000"
+echo "Access Frontend at http://localhost:3002"
 echo "Press Ctrl+C to stop"
 
 # Wait for processes

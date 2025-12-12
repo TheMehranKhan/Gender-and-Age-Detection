@@ -1,10 +1,11 @@
 import http.server
-import socketserver
 import os
+import socketserver
 import sys
 
-PORT = 3000
+PORT = 3002
 DIRECTORY = "."
+
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -20,12 +21,13 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
         except ConnectionResetError:
             pass
 
+
 if __name__ == "__main__":
     # Change to the directory where the script is located (frontend)
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    
+
     Handler = QuietHandler
-    
+
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
         print(f"Frontend serving at http://localhost:{PORT}")
         try:
